@@ -4,7 +4,9 @@
 const { createFFmpeg, fetchFile } = FFmpeg;
 const ffmpeg = createFFmpeg({
     log: true, // Enable logging to see FFmpeg output
-    corePath: 'https://unpkg.com/@ffmpeg/core@0.8.5/dist/ffmpeg-core.js' // Specify core path from CDN
+    corePath: 'https://unpkg.com/@ffmpeg/core@0.8.5/dist/ffmpeg-core.js', // Specify core path from CDN
+    // You can optionally add a MEMFS size limit, but often the browser's own limit is hit first.
+    // mainScriptUrl: 'https://unpkg.com/@ffmpeg/core@0.8.5/dist/ffmpeg-core.js' // Alternative for corePath if needed
 });
 
 // Get DOM elements
@@ -27,10 +29,10 @@ const logMessage = (msg) => {
     logsElement.scrollTop = logsElement.scrollHeight; // Auto-scroll to bottom
 };
 
-// Clear all logs and output
+// Clear all logs and output, and revoke Blob URLs
 const resetApp = () => {
     logsElement.textContent = '';
-    outputVideo.src = '';
+    outputVideo.src = ''; // Clear video source
     outputVideo.style.display = 'none';
     downloadLink.href = '#';
     downloadLink.style.display = 'none';
@@ -81,13 +83,17 @@ processBtn.addEventListener('click', async () => {
     logMessage('--- Starting Processing ---');
     logsElement.textContent = ''; // Clear previous logs for a fresh start
 
+    const inputVideoFileName = videoFile.name.replace(/ /g, '_'); // Replace spaces for FFmpeg safety
+    const inputAudioFileName = audioFile.name.replace(/ /g, '_');
+    const outputFileName = 'synced_output.mp4';
+
     try {
         // 1. Load FFmpeg if not already loaded
         logMessage('Loading FFmpeg (this might take a moment if not cached)...');
         if (!ffmpeg.isLoaded()) {
             ffmpeg.setLogger(({ type, message }) => {
                 // You can filter messages here if you want less verbosity
-                // if (type === 'fferr') { // FFmpeg logs often go to stderr
+                // if (type === 'fferr') {
                 logMessage(message);
                 // }
             });
@@ -98,47 +104,44 @@ processBtn.addEventListener('click', async () => {
         }
 
         // 2. Write files to FFmpeg's virtual file system
-        logMessage(`Writing video file (${videoFile.name}) to virtual file system...`);
-        ffmpeg.FS('writeFile', videoFile.name, await fetchFile(videoFile));
-        logMessage(`Writing audio file (${audioFile.name}) to virtual file system...`);
-        ffmpeg.FS('writeFile', audioFile.name, await fetchFile(audioFile));
+        logMessage(`Writing video file (${inputVideoFileName}) to virtual file system...`);
+        ffmpeg.FS('writeFile', inputVideoFileName, await fetchFile(videoFile));
+        logMessage(`Writing audio file (${inputAudioFileName}) to virtual file system...`);
+        ffmpeg.FS('writeFile', inputAudioFileName, await fetchFile(audioFile));
 
         // 3. Get durations of video and audio
         logMessage('Analyzing video and audio durations...');
         let videoDuration = 0;
         let audioDuration = 0;
 
-        // Regex to parse duration from FFmpeg output (e.g., "Duration: 00:00:10.50")
         const durationRegex = /Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/;
+        const originalLogger = ffmpeg.setLogger; // Store original logger if we need to revert
 
-        // Custom logger for duration parsing
-        const durationLogger = ({ type, message }) => {
-            if (type === 'fferr') { // FFmpeg often logs info to stderr
+        // Temporarily set a logger to capture duration information
+        ffmpeg.setLogger(({ type, message }) => {
+            if (type === 'fferr' || type === 'log') { // FFmpeg logs often go to stderr or stdout (log type)
                 const matches = message.match(durationRegex);
                 if (matches) {
                     const [_, h, m, s, ms] = matches;
-                    const durationInSeconds = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseFloat(`0.${ms}`); // Use parseFloat for ms
+                    const durationInSeconds = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseFloat(`0.${ms}`);
                     
-                    // A simple heuristic to assign duration to the correct file
-                    // This relies on FFmpeg outputting the input file name before its duration
-                    if (message.includes(videoFile.name)) {
+                    // Simple heuristic to assign duration: check if the file name is in the message
+                    if (message.includes(inputVideoFileName)) {
                         videoDuration = durationInSeconds;
-                    } else if (message.includes(audioFile.name)) {
+                    } else if (message.includes(inputAudioFileName)) {
                         audioDuration = durationInSeconds;
                     }
                 }
             }
             logMessage(message); // Also log everything to the UI
-        };
-        ffmpeg.setLogger(durationLogger); // Temporarily set logger for duration parsing
+        });
 
-        // Run FFmpeg commands to get info (this will output duration to logs)
-        await ffmpeg.run('-i', videoFile.name);
-        await ffmpeg.run('-i', audioFile.name);
+        // Run FFmpeg commands to get info for each file
+        await ffmpeg.run('-i', inputVideoFileName);
+        await ffmpeg.run('-i', inputAudioFileName);
 
-        // Remove the specific duration logger and revert to basic logging if desired
-        // (For simplicity, we keep the durationLogger active throughout)
-        // ffmpeg.setLogger(({ message }) => logMessage(message)); // Revert if needed
+        // Revert to original logger if needed, though for this app, keeping the duration logger is fine
+        // ffmpeg.setLogger(originalLogger); // Restore original logging behavior
 
         if (videoDuration === 0 || audioDuration === 0) {
             throw new Error("Could not determine video or audio duration. Files might be corrupted or unsupported.");
@@ -148,10 +151,6 @@ processBtn.addEventListener('click', async () => {
         logMessage(`Audio Duration: ${audioDuration.toFixed(2)} seconds`);
 
         // 4. Calculate speed factor
-        // The goal is: new_video_duration = audio_duration
-        // FFmpeg's setpts filter: new_PTS = old_PTS / speed_factor
-        // So, original_video_duration / speed_factor = audio_duration
-        // Rearranging: speed_factor = original_video_duration / audio_duration
         const speedFactor = videoDuration / audioDuration;
 
         logMessage(`Calculated speed factor for video: ${speedFactor.toFixed(4)}`);
@@ -164,38 +163,26 @@ processBtn.addEventListener('click', async () => {
         }
 
         // 5. Run FFmpeg command to adjust video speed and merge with audio
-        const outputFileName = 'synced_output.mp4';
         logMessage('Processing video and audio...');
 
-        // FFmpeg command explanation:
-        // -i ${videoFile.name} : Input video file
-        // -i ${audioFile.name} : Input audio file
-        // -filter_complex "[0:v]setpts=PTS/${speedFactor}[v]" :
-        //    [0:v] refers to the video stream of the first input (video).
-        //    setpts=PTS/${speedFactor} modifies the presentation timestamp (PTS) of each frame.
-        //    If speedFactor > 1, PTS becomes smaller, so frames are shown faster (sped up).
-        //    If speedFactor < 1, PTS becomes larger, so frames are shown slower (slowed down).
-        //    [v] names this processed video stream.
-        // -map "[v]" : Use the processed video stream.
-        // -map 1:a : Use the audio stream from the second input (audio).
-        // -c:v libx264 -preset medium -crf 23 : Video encoding settings (H.264, medium quality).
-        //    'medium' preset is a good balance for browser-side. 'fast' or 'superfast' can be quicker.
-        //    CRF (Constant Rate Factor) 23 is a good default quality. Lower means higher quality/larger file.
-        // -c:a aac -b:a 128k : Audio encoding settings (AAC codec, 128kbps bitrate).
-        // -shortest : Ensures the output duration is the length of the shortest stream.
-        //             Since we've re-timed the video to match audio duration, this effectively trims to audio duration.
+        // **Memory Optimization 1: Use faster preset and higher CRF**
+        // 'ultrafast' preset sacrifices file size for speed and lower memory.
+        // CRF 28 is lower quality than 23 but results in smaller files and can be faster.
+        // Consider adding `-vf scale=w=1280:h=720` or similar if resolution is a common issue.
+        // For simplicity, I'm not adding scale by default, but it's a powerful tool.
         await ffmpeg.run(
-            '-i', videoFile.name,
-            '-i', audioFile.name,
+            '-i', inputVideoFileName,
+            '-i', inputAudioFileName,
             '-filter_complex', `[0:v]setpts=PTS/${speedFactor}[v]`,
             '-map', '[v]',
             '-map', '1:a',
             '-c:v', 'libx264',
-            '-preset', 'medium', // Balance between speed and file size
-            '-crf', '23',        // Good quality
+            '-preset', 'veryfast', // Changed from medium to veryfast
+            '-crf', '25',         // Changed from 23 to 25 (slightly lower quality, smaller file)
             '-c:a', 'aac',
-            '-b:a', '128k',      // Standard audio quality
+            '-b:a', '128k',
             '-shortest',
+            '-y', // Overwrite output file without asking
             outputFileName
         );
 
@@ -205,13 +192,18 @@ processBtn.addEventListener('click', async () => {
         logMessage('Reading output file from virtual file system...');
         const data = ffmpeg.FS('readFile', outputFileName);
         const blob = new Blob([data.buffer], { type: 'video/mp4' });
-        currentVideoURL = URL.createObjectURL(blob); // Store for cleanup
+
+        // **Memory Optimization 2: Revoke previous blob URL before creating new one**
+        if (currentVideoURL) {
+            URL.revokeObjectURL(currentVideoURL);
+        }
+        currentVideoURL = URL.createObjectURL(blob);
 
         outputVideo.src = currentVideoURL;
         downloadLink.href = currentVideoURL;
-        downloadLink.textContent = `Download Synced Video (${outputFileName})`; // Show filename
+        downloadLink.textContent = `Download Synced Video (${outputFileName})`;
 
-        outputContainer.style.display = 'block'; // Show the output section
+        outputContainer.style.display = 'block';
         logMessage('Video ready for playback and download.');
 
     } catch (error) {
@@ -219,14 +211,23 @@ processBtn.addEventListener('click', async () => {
         console.error("FFmpeg processing failed:", error);
         alert(`An error occurred during processing. Check logs for details: ${error.message}`);
     } finally {
-        // Clean up files from virtual file system
-        try {
-            ffmpeg.FS('unlink', videoFile.name);
-            ffmpeg.FS('unlink', audioFile.name);
-            // Attempt to unlink output file, ignore if it wasn't created due to error
-            try { ffmpeg.FS('unlink', 'synced_output.mp4'); } catch (e) {}
-        } catch (e) {
-            console.warn("Error cleaning up virtual files:", e);
+        // **Memory Optimization 3: Aggressive cleanup of virtual files**
+        // Ensure this happens even if there was an error during processing.
+        if (ffmpeg.isLoaded()) { // Only try to unlink if FFmpeg is actually loaded
+            try {
+                // Unlink input files as soon as they're not needed (after being read into FS)
+                // This is done implicitly when we finish the process, but good to be explicit
+                // or if you have multiple steps.
+                // For this single-step process, unlinking in finally is sufficient.
+                ffmpeg.FS('unlink', inputVideoFileName);
+                ffmpeg.FS('unlink', inputAudioFileName);
+                // Unlink output file as well, it's now in the Blob
+                ffmpeg.FS('unlink', outputFileName);
+                logMessage('Cleaned up virtual file system.');
+            } catch (e) {
+                console.warn("Error cleaning up virtual files:", e);
+                logMessage(`Warning: Could not fully clean up virtual files: ${e.message}`);
+            }
         }
         processBtn.disabled = false;
         resetBtn.disabled = false;
