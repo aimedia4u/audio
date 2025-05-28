@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Audio Visualizer</title>
+    <title>Dynamic Audio Features Visualizer</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -27,7 +27,7 @@
             padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            box-sizing: border-box; /* Include padding in width */
+            box-sizing: border-box;
         }
 
         h1 {
@@ -84,15 +84,13 @@
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
         }
 
-        /* Message/Status text */
         #statusMessage {
             color: #555;
             font-size: 0.9em;
             margin-top: 10px;
-            min-height: 1.5em; /* Reserve space to prevent layout shift */
+            min-height: 1.5em;
         }
 
-        /* Responsive adjustments */
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
@@ -111,8 +109,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>Simple Audio Visualizer</h1>
-        <p>Upload an audio file (.mp3, .wav, etc.) to see its waveform and a real-time spectrogram.</p>
+        <h1>Dynamic Audio Features Visualizer</h1>
+        <p>Upload an audio file (.mp3, .wav, etc.) to see its real-time waveform and loudness.</p>
 
         <div class="file-input-section">
             <input type="file" id="audioFileInput" accept="audio/*">
@@ -125,13 +123,13 @@
         </div>
 
         <div class="visualizer-section">
-            <h2>Waveform</h2>
+            <h2>Scrolling Waveform (Amplitude)</h2>
             <canvas id="waveformCanvas" width="800" height="150"></canvas>
         </div>
 
         <div class="visualizer-section">
-            <h2>Spectrogram (Scrolling)</h2>
-            <canvas id="spectrogramCanvas" width="800" height="250"></canvas>
+            <h2>Scrolling RMS Loudness</h2>
+            <canvas id="rmsCanvas" width="800" height="150"></canvas>
         </div>
     </div>
 
@@ -140,19 +138,24 @@
         const audioFileInput = document.getElementById('audioFileInput');
         const audioPlayer = document.getElementById('audioPlayer');
         const waveformCanvas = document.getElementById('waveformCanvas');
-        const spectrogramCanvas = document.getElementById('spectrogramCanvas');
+        const rmsCanvas = document.getElementById('rmsCanvas'); // Renamed from spectrogramCanvas
         const statusMessage = document.getElementById('statusMessage');
 
         const waveformCtx = waveformCanvas.getContext('2d');
-        const spectrogramCtx = spectrogramCanvas.getContext('2d');
+        const rmsCtx = rmsCanvas.getContext('2d');
 
         // --- Global Audio API Variables ---
         let audioContext = null;
         let analyserNode = null;
         let audioSource = null;
-        let audioBuffer = null; // To store the full audio data for static waveform
-        let spectrogramAnimationId = null; // To control spectrogram animation loop
-        let playheadAnimationId = null; // To control playhead animation loop
+        let animationId = null; // Single animation ID for both plots
+
+        // --- Constants for Visualization ---
+        const FFT_SIZE = 2048; // Samples for analyser. Affects resolution of real-time data.
+        const SLICE_WIDTH = 1; // How many pixels to draw per animation frame (and shift by)
+
+        // Data arrays to hold audio time-domain data (for waveform and RMS)
+        let timeDomainData = new Float32Array(FFT_SIZE); // For float values (-1.0 to 1.0)
 
         // --- Event Listener for File Input ---
         audioFileInput.addEventListener('change', async (event) => {
@@ -174,204 +177,140 @@
         // --- Core Audio Loading and Processing Function ---
         async function loadAudio(file) {
             // Reset existing state
-            stopAnimations();
+            stopAnimation();
             if (audioContext) audioContext.close(); // Close previous context
             audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Create new context
 
             audioPlayer.src = URL.createObjectURL(file); // Set source for HTML audio player
             audioPlayer.load(); // Load the audio file
 
-            // Use FileReader to get ArrayBuffer for offline decoding (for full waveform)
-            const arrayBuffer = await file.arrayBuffer();
-            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
             // Connect HTML audio player to AudioContext for real-time analysis
             audioSource = audioContext.createMediaElementSource(audioPlayer);
             analyserNode = audioContext.createAnalyser();
-            analyserNode.fftSize = 2048; // Sets the window size for FFT. Higher = more freq resolution, less time resolution.
-            // analyserNode.smoothingTimeConstant = 0.8; // Makes frequency data smoother
+            analyserNode.fftSize = FFT_SIZE; // Set the window size for analysis
+            analyserNode.smoothingTimeConstant = 0.5; // Smoothes the data
 
             audioSource.connect(analyserNode);
             analyserNode.connect(audioContext.destination); // Connect to speakers
 
-            drawStaticWaveform(audioBuffer); // Draw the full waveform once
             setupAudioPlayerListeners(); // Set up play/pause listeners for animation control
+
+            // Clear canvases fully when new audio loads
+            clearCanvases();
         }
 
         // --- Drawing Functions ---
 
-        // Draw the full static waveform
-        function drawStaticWaveform(buffer) {
-            const width = waveformCanvas.width;
-            const height = waveformCanvas.height;
-            waveformCtx.clearRect(0, 0, width, height); // Clear previous drawing
+        // Main animation loop that updates both scrolling plots
+        function animatePlots() {
+            if (!analyserNode || audioPlayer.paused || audioPlayer.ended) {
+                animationId = null; // Stop the loop if conditions are not met
+                return;
+            }
 
-            waveformCtx.fillStyle = '#f8f8f8'; // Canvas background
-            waveformCtx.fillRect(0, 0, width, height);
+            // Get time-domain data (amplitude values)
+            analyserNode.getFloatTimeDomainData(timeDomainData);
 
-            waveformCtx.strokeStyle = '#4A90E2'; // Waveform line color
-            waveformCtx.lineWidth = 1.5;
+            // --- Draw Scrolling Waveform ---
+            const waveformWidth = waveformCanvas.width;
+            const waveformHeight = waveformCanvas.height;
+            const waveformCenterY = waveformHeight / 2;
 
-            const data = buffer.getChannelData(0); // Get audio data from the first channel
-            const step = Math.ceil(data.length / width); // How many data points per pixel
-            const amp = height / 2; // Amplitude center
+            // Shift existing waveform content to the left
+            waveformCtx.drawImage(waveformCanvas, -SLICE_WIDTH, 0, waveformWidth, waveformHeight);
+            // Clear the rightmost column for new data
+            waveformCtx.clearRect(waveformWidth - SLICE_WIDTH, 0, SLICE_WIDTH, waveformHeight);
 
+            // Draw the new waveform slice
+            waveformCtx.strokeStyle = '#4A90E2'; // Blue
+            waveformCtx.lineWidth = 1;
             waveformCtx.beginPath();
-            waveformCtx.moveTo(0, amp); // Start at the middle left
+            waveformCtx.moveTo(waveformWidth - SLICE_WIDTH, waveformCenterY); // Start at previous point's Y
 
-            for (let i = 0; i < width; i++) {
-                let min = 1.0;
-                let max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const datum = data[(i * step) + j];
-                    if (datum < min) min = datum;
-                    if (datum > max) max = datum;
-                }
-                waveformCtx.lineTo(i, (1 + max) * amp); // Top peak
+            // Average samples for smoother line in one pixel slice
+            let sumAmplitude = 0;
+            for (let i = 0; i < timeDomainData.length; i++) {
+                sumAmplitude += timeDomainData[i];
             }
+            // Use the first sample or an average for this slice's amplitude
+            const avgAmplitude = timeDomainData[0]; // Simplest: just use the first sample
+            // More robust: average over the whole buffer for the "current" amplitude
+            // const avgAmplitude = sumAmplitude / timeDomainData.length;
 
-            for (let i = width - 1; i >= 0; i--) { // Draw bottom part back
-                let min = 1.0;
-                let max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const datum = data[(i * step) + j];
-                    if (datum < min) min = datum;
-                    if (datum > max) max = datum;
-                }
-                waveformCtx.lineTo(i, (1 + min) * amp); // Bottom peak
-            }
-            waveformCtx.closePath();
+            const xPos = waveformWidth - SLICE_WIDTH;
+            const yPos = waveformCenterY + avgAmplitude * waveformCenterY;
+            waveformCtx.lineTo(xPos, yPos);
             waveformCtx.stroke();
-            waveformCtx.fill(); // Fill the waveform area
-        }
 
-        // Draw the moving playhead on the waveform
-        function drawPlayhead() {
-            if (!audioPlayer.duration || isNaN(audioPlayer.duration)) return; // Ensure duration is valid
 
-            const width = waveformCanvas.width;
-            const height = waveformCanvas.height;
+            // --- Draw Scrolling RMS Loudness ---
+            const rmsWidth = rmsCanvas.width;
+            const rmsHeight = rmsCanvas.height;
+            const rmsCenterY = rmsHeight; // RMS is positive, so plot from bottom
 
-            // Clear previous playhead if it exists and is not at 0
-            if (playheadAnimationId) {
-                const oldX = (audioPlayer.currentTime - (1/60)) / audioPlayer.duration * width; // Estimate previous position
-                waveformCtx.clearRect(oldX - 2, 0, 5, height); // Clear a small area around the old line
-                drawStaticWaveform(audioBuffer); // Redraw the static waveform segment in the cleared area
+            // Shift existing RMS content to the left
+            rmsCtx.drawImage(rmsCanvas, -SLICE_WIDTH, 0, rmsWidth, rmsHeight);
+            // Clear the rightmost column for new data
+            rmsCtx.clearRect(rmsWidth - SLICE_WIDTH, 0, SLICE_WIDTH, rmsHeight);
+
+            // Calculate RMS for the current timeDomainData buffer
+            let sumOfSquares = 0;
+            for (let i = 0; i < timeDomainData.length; i++) {
+                sumOfSquares += timeDomainData[i] * timeDomainData[i];
             }
+            const rmsValue = Math.sqrt(sumOfSquares / timeDomainData.length); // RMS is 0 to 1
 
-            // Calculate current playhead position
-            const x = (audioPlayer.currentTime / audioPlayer.duration) * width;
+            // Map RMS value to Y position on canvas (inverted for "higher is louder")
+            const rmsY = rmsHeight - (rmsValue * rmsHeight); // Max RMS (1) is at bottom (0)
 
-            waveformCtx.strokeStyle = 'red';
-            waveformCtx.lineWidth = 2;
-            waveformCtx.beginPath();
-            waveformCtx.moveTo(x, 0);
-            waveformCtx.lineTo(x, height);
-            waveformCtx.stroke();
-        }
+            rmsCtx.fillStyle = '#E74C3C'; // Red
+            rmsCtx.fillRect(rmsWidth - SLICE_WIDTH, rmsY, SLICE_WIDTH, rmsHeight - rmsY); // Draw a bar for RMS
 
+            // Optionally, draw a line connecting RMS values (more complex for scrolling line graph)
+            // For a "simple man", the bars are more straightforward.
 
-        // Start the real-time scrolling spectrogram animation
-        function startSpectrogramAnimation() {
-            if (!analyserNode) return;
-
-            const bufferLength = analyserNode.frequencyBinCount; // Half of fftSize
-            const dataArray = new Uint8Array(bufferLength);
-            const sliceWidth = 1; // Drawing 1 pixel slice at a time
-
-            spectrogramCtx.clearRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height); // Clear on start
-
-            function animateSpectrogram() {
-                // Shift existing content to the left
-                spectrogramCtx.drawImage(spectrogramCanvas, -sliceWidth, 0, spectrogramCanvas.width, spectrogramCanvas.height);
-                // Clear the rightmost column for new data
-                spectrogramCtx.clearRect(spectrogramCanvas.width - sliceWidth, 0, sliceWidth, spectrogramCanvas.height);
-
-                analyserNode.getByteFrequencyData(dataArray); // Get frequency data
-
-                // Draw the new column of data
-                for (let i = 0; i < bufferLength; i++) {
-                    const value = dataArray[i]; // Value is 0-255
-                    const percent = value / 255;
-                    const y = spectrogramCanvas.height - (i / bufferLength) * spectrogramCanvas.height; // Map freq to Y (bottom-up)
-
-                    // Simple "magma-like" color mapping (HSL)
-                    // Hue: Red (0) to Purple (300)
-                    // Saturation: Always high (100%)
-                    // Lightness: From dark (20%) to bright (80%) based on intensity
-                    const hue = 0 + (1 - percent) * 80; // From ~red to orange/yellow
-                    const saturation = 100;
-                    const lightness = 20 + percent * 60; // From dark to bright
-                    spectrogramCtx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-
-                    spectrogramCtx.fillRect(spectrogramCanvas.width - sliceWidth, y, sliceWidth, spectrogramCanvas.height / bufferLength);
-                }
-                spectrogramAnimationId = requestAnimationFrame(animateSpectrogram);
-            }
-            animateSpectrogram(); // Start the loop
+            // Request next animation frame
+            animationId = requestAnimationFrame(animatePlots);
         }
 
         // --- Animation Control ---
 
         function setupAudioPlayerListeners() {
-            // Start animations when audio plays
             audioPlayer.onplay = () => {
-                if (!spectrogramAnimationId) {
-                    startSpectrogramAnimation();
-                }
-                if (!playheadAnimationId) {
-                    // Use requestAnimationFrame for smoother playhead,
-                    // but it needs to redraw entire waveform each time for proper clearing,
-                    // or draw on a separate canvas. For simplicity, we'll redraw a small area.
-                    // Even simpler: Just redraw the playhead within the existing loop.
-                    // For "simple man", let's make it easy to follow:
-                    playheadAnimationId = requestAnimationFrame(function animateWaveformPlayhead() {
-                        drawStaticWaveform(audioBuffer); // Redraw full waveform
-                        drawPlayhead(); // Draw playhead on top
-                        if (!audioPlayer.paused) {
-                           playheadAnimationId = requestAnimationFrame(animateWaveformPlayhead);
-                        }
-                    });
+                if (!animationId) { // Only start if not already running
+                    animatePlots();
                 }
             };
 
-            // Stop animations when audio pauses or ends
             audioPlayer.onpause = () => {
-                stopAnimations();
+                stopAnimation();
             };
             audioPlayer.onended = () => {
-                stopAnimations();
-                // Reset playhead to start
-                drawStaticWaveform(audioBuffer); // Redraw without playhead
-                waveformCtx.strokeStyle = 'red';
-                waveformCtx.lineWidth = 2;
-                waveformCtx.beginPath();
-                waveformCtx.moveTo(0, 0);
-                waveformCtx.lineTo(0, waveformCanvas.height);
-                waveformCtx.stroke();
+                stopAnimation();
+                clearCanvases(); // Clear canvases on end
+                statusMessage.textContent = "Audio playback ended. Select another file.";
             };
         }
 
-        function stopAnimations() {
-            if (spectrogramAnimationId) {
-                cancelAnimationFrame(spectrogramAnimationId);
-                spectrogramAnimationId = null;
-            }
-            if (playheadAnimationId) {
-                cancelAnimationFrame(playheadAnimationId);
-                playheadAnimationId = null;
+        function stopAnimation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
             }
         }
 
-        // Initial setup to clear canvases
-        waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-        waveformCtx.fillStyle = '#f8f8f8';
-        waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-        spectrogramCtx.clearRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height);
-        spectrogramCtx.fillStyle = '#f8f8f8';
-        spectrogramCtx.fillRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height);
+        function clearCanvases() {
+            waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+            waveformCtx.fillStyle = '#f8f8f8'; // Background color
+            waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
 
-        // Inform user how to start
+            rmsCtx.clearRect(0, 0, rmsCanvas.width, rmsCanvas.height);
+            rmsCtx.fillStyle = '#f8f8f8'; // Background color
+            rmsCtx.fillRect(0, 0, rmsCanvas.width, rmsCanvas.height);
+        }
+
+        // Initial setup on page load
+        clearCanvases();
         statusMessage.textContent = "Please select an audio file to begin.";
     </script>
 </body>
