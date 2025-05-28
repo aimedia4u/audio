@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Waveform Visualizer</title>
+    <!-- Wavesurfer.js CDN -->
+    <script src="https://unpkg.com/wavesurfer.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0056b3;
+        }
+        #drop-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 50px;
+            margin: 20px 0;
+            cursor: pointer;
+            background-color: #f9f9f9;
+            transition: background-color 0.3s ease;
+        }
+        #drop-area.highlight {
+            background-color: #e0e0e0;
+        }
+        #drop-area p {
+            margin: 0;
+            font-size: 1.2em;
+            color: #666;
+        }
+        input[type="file"] {
+            display: none; /* Hide the default file input */
+        }
+        #waveform {
+            margin-top: 30px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #e0e0e0;
+        }
+        audio {
+            width: 100%;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dynamic Audio Waveform Visualizer</h1>
+        <p>Upload an audio file (e.g., MP3, WAV) to see its waveform.</p>
+
+        <div id="drop-area">
+            <input type="file" id="audioUpload" accept="audio/*">
+            <p>Drag and drop audio files here, or click to select files</p>
+        </div>
+
+        <div id="waveform"></div>
+        <audio id="audioPlayer" controls></audio>
+    </div>
+
+    <script>
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('audioUpload');
+        const waveformDiv = document.getElementById('waveform');
+        const audioPlayer = document.getElementById('audioPlayer');
+        let wavesurfer = null;
+
+        // Initialize Wavesurfer
+        function initWavesurfer() {
+            if (wavesurfer) {
+                wavesurfer.destroy(); // Destroy previous instance if it exists
+            }
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: 'violet',
+                progressColor: 'purple',
+                cursorColor: 'navy',
+                barWidth: 3,
+                barRadius: 3,
+                height: 100,
+                responsive: true,
+                hideScrollbar: true,
+                normalize: true, // Normalize the peaks to 0..1 to maximize the waveform display
+            });
+
+            // Attach events for playback
+            wavesurfer.on('play', () => {
+                audioPlayer.play();
+            });
+            wavesurfer.on('pause', () => {
+                audioPlayer.pause();
+            });
+            wavesurfer.on('seek', (progress) => {
+                audioPlayer.currentTime = progress * audioPlayer.duration;
+            });
+            audioPlayer.onplay = () => wavesurfer.play();
+            audioPlayer.onpause = () => wavesurfer.pause();
+            audioPlayer.ontimeupdate = () => {
+                if (!wavesurfer.isPlaying()) { // Only update wavesurfer if not playing directly
+                    wavesurfer.seekTo(audioPlayer.currentTime / audioPlayer.duration);
+                }
+            };
+        }
+
+        // Handle file selection
+        function handleFile(file) {
+            if (file.type.startsWith('audio/')) {
+                initWavesurfer(); // Re-initialize for new file
+                const fileURL = URL.createObjectURL(file);
+                audioPlayer.src = fileURL;
+                wavesurfer.load(fileURL);
+            } else {
+                alert('Please upload an audio file!');
+            }
+        }
+
+        // Drag and Drop Handlers
+        dropArea.addEventListener('click', () => fileInput.click()); // Click to open file dialog
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight(e) {
+            dropArea.classList.remove('highlight');
+        }
+
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        }
+
+        fileInput.addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        // Initial setup (optional: load a default audio file)
+        // initWavesurfer();
+        // wavesurfer.load('path/to/default_audio.mp3'); // If you have a default audio file in your repo
+        </script>
+</body>
+</html>
