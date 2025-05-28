@@ -3,105 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Audio Waveform & Spectrogram Visualizer</title>
-
-    <!-- Wavesurfer.js CDN -->
-    <!-- Core library for waveform visualization -->
-    <script src="https://unpkg.com/wavesurfer.js"></script>
-    <!-- Spectrogram Plugin for Wavesurfer.js -->
-    <!-- This plugin is essential for generating the spectrogram -->
-    <script src="https://unpkg.com/wavesurfer.js/dist/plugin/wavesurfer.spectrogram.min.js"></script>
-
+    <title>Simple Audio Visualizer</title>
     <style>
-        /* General body styling */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #f0f2f5; /* Light gray background */
+            background-color: #f0f2f5;
             color: #333;
             text-align: center;
             line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
         }
 
-        /* Main container for the app */
         .container {
             max-width: 900px;
+            width: 100%;
             margin: 20px auto;
             background-color: #ffffff;
             padding: 30px;
             border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Soft shadow */
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box; /* Include padding in width */
         }
 
-        /* Headings */
         h1 {
-            color: #2c3e50; /* Dark blue-gray */
+            color: #2c3e50;
             margin-bottom: 10px;
             font-size: 2.2em;
         }
         h2 {
-            color: #34495e; /* Slightly lighter blue-gray */
+            color: #34495e;
             margin-top: 30px;
             margin-bottom: 15px;
             font-size: 1.6em;
-            text-align: left; /* Align section titles to the left */
+            text-align: left;
             border-bottom: 1px solid #eee;
             padding-bottom: 5px;
         }
 
-        /* Paragraphs */
-        p {
-            margin-bottom: 15px;
-            color: #555;
-        }
-        .note {
-            font-size: 0.9em;
-            color: #7f8c8d; /* Muted gray */
-            margin-top: 15px;
-            font-style: italic;
+        .file-input-section {
+            margin-bottom: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
         }
 
-        /* Drag and Drop Area */
-        #drop-area {
-            border: 2px dashed #95a5a6; /* Muted cyan-gray */
-            border-radius: 10px;
-            padding: 60px 30px;
-            margin: 30px 0;
-            cursor: pointer;
-            background-color: #ecf0f1; /* Light cyan-gray */
-            transition: background-color 0.3s ease, border-color 0.3s ease;
-        }
-        #drop-area.highlight {
-            background-color: #dfe6e9; /* Slightly darker on hover/drag */
-            border-color: #3498db; /* Blue highlight */
-        }
-        #drop-area p {
-            margin: 0;
-            font-size: 1.4em;
-            color: #666;
-            font-weight: bold;
-        }
         input[type="file"] {
-            display: none; /* Hide the default file input button */
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #e9ecef;
+            cursor: pointer;
+            font-size: 1em;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        input[type="file"]:hover {
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0, 123, 255, 0.2);
         }
 
-        /* Visualizer Sections */
-        .visualizer-section {
-            margin-top: 40px;
-        }
-        /* Containers for Waveform and Spectrogram */
-        #waveform-container, #spectrogram-container {
-            border: 1px solid #dcdcdc; /* Light border */
-            border-radius: 8px;
-            background-color: #f8f8f8; /* Very light background for plots */
-            margin-bottom: 25px;
-            overflow: hidden; /* Crucial for containing the Wavesurfer canvas */
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); /* Inner shadow for depth */
-            padding: 5px; /* Little padding around the plot */
-        }
-
-        /* HTML5 Audio Player */
         audio {
             width: 100%;
             margin-top: 20px;
@@ -110,17 +75,27 @@
             background-color: #f5f5f5;
         }
 
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #dcdcdc;
+            background-color: #f8f8f8;
+            border-radius: 8px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        /* Message/Status text */
+        #statusMessage {
+            color: #555;
+            font-size: 0.9em;
+            margin-top: 10px;
+            min-height: 1.5em; /* Reserve space to prevent layout shift */
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .container {
-                margin: 10px auto;
                 padding: 20px;
-            }
-            #drop-area {
-                padding: 40px 20px;
-            }
-            #drop-area p {
-                font-size: 1.1em;
             }
             h1 {
                 font-size: 1.8em;
@@ -128,220 +103,276 @@
             h2 {
                 font-size: 1.4em;
             }
+            input[type="file"] {
+                width: 90%;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Dynamic Audio Visualizer</h1>
-        <p>Upload an audio file (e.g., MP3, WAV, OGG) to see its waveform and spectrogram.</p>
-        <p class="note">
-            This tool processes audio directly in your web browser. Due to complexity, it does not support video files directly.
-            For video, you would need to first extract the audio using a desktop tool or advanced client-side libraries.
-        </p>
+        <h1>Simple Audio Visualizer</h1>
+        <p>Upload an audio file (.mp3, .wav, etc.) to see its waveform and a real-time spectrogram.</p>
 
-        <!-- Drop area for file upload -->
-        <div id="drop-area">
-            <input type="file" id="audioUpload" accept="audio/*">
-            <p>Drag and drop audio files here, or click to select files</p>
+        <div class="file-input-section">
+            <input type="file" id="audioFileInput" accept="audio/*">
+            <p id="statusMessage">Please select an audio file to begin.</p>
         </div>
 
-        <!-- Audio Playback Section -->
         <div class="visualizer-section">
             <h2>Audio Playback</h2>
             <audio id="audioPlayer" controls></audio>
         </div>
 
-        <!-- Waveform Visualization Section -->
         <div class="visualizer-section">
             <h2>Waveform</h2>
-            <div id="waveform-container">
-                <div id="waveform"></div>
-            </div>
-            <p class="note">
-                (The waveform shows the amplitude of the audio signal over time.)
-            </p>
+            <canvas id="waveformCanvas" width="800" height="150"></canvas>
         </div>
 
-        <!-- Spectrogram Visualization Section -->
         <div class="visualizer-section">
-            <h2>Spectrogram</h2>
-            <div id="spectrogram-container">
-                <div id="spectrogram"></div>
-            </div>
-            <p class="note">
-                (The spectrogram visualizes the frequency content of the audio over time.
-                Brighter colors typically indicate higher intensity at that frequency and time.)
-            </p>
+            <h2>Spectrogram (Scrolling)</h2>
+            <canvas id="spectrogramCanvas" width="800" height="250"></canvas>
         </div>
-
     </div>
 
     <script>
-        // Get references to HTML elements
-        const dropArea = document.getElementById('drop-area');
-        const fileInput = document.getElementById('audioUpload');
+        // --- Get DOM Elements ---
+        const audioFileInput = document.getElementById('audioFileInput');
         const audioPlayer = document.getElementById('audioPlayer');
-        let wavesurfer = null; // Variable to hold the Wavesurfer instance
+        const waveformCanvas = document.getElementById('waveformCanvas');
+        const spectrogramCanvas = document.getElementById('spectrogramCanvas');
+        const statusMessage = document.getElementById('statusMessage');
 
-        // Function to initialize or re-initialize Wavesurfer with plugins
-        function initWavesurfer() {
-            // Destroy existing Wavesurfer instance if it exists to prevent multiple instances
-            if (wavesurfer) {
-                wavesurfer.destroy();
-                // Clear the containers manually as destroy() sometimes leaves remnants
-                document.getElementById('waveform').innerHTML = '';
-                document.getElementById('spectrogram').innerHTML = '';
+        const waveformCtx = waveformCanvas.getContext('2d');
+        const spectrogramCtx = spectrogramCanvas.getContext('2d');
+
+        // --- Global Audio API Variables ---
+        let audioContext = null;
+        let analyserNode = null;
+        let audioSource = null;
+        let audioBuffer = null; // To store the full audio data for static waveform
+        let spectrogramAnimationId = null; // To control spectrogram animation loop
+        let playheadAnimationId = null; // To control playhead animation loop
+
+        // --- Event Listener for File Input ---
+        audioFileInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                statusMessage.textContent = "Loading audio...";
+                try {
+                    await loadAudio(file);
+                    statusMessage.textContent = `Audio loaded: ${file.name}`;
+                } catch (error) {
+                    statusMessage.textContent = `Error loading audio: ${error.message}`;
+                    console.error("Audio loading error:", error);
+                }
+            } else {
+                statusMessage.textContent = "No file selected.";
+            }
+        });
+
+        // --- Core Audio Loading and Processing Function ---
+        async function loadAudio(file) {
+            // Reset existing state
+            stopAnimations();
+            if (audioContext) audioContext.close(); // Close previous context
+            audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Create new context
+
+            audioPlayer.src = URL.createObjectURL(file); // Set source for HTML audio player
+            audioPlayer.load(); // Load the audio file
+
+            // Use FileReader to get ArrayBuffer for offline decoding (for full waveform)
+            const arrayBuffer = await file.arrayBuffer();
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+            // Connect HTML audio player to AudioContext for real-time analysis
+            audioSource = audioContext.createMediaElementSource(audioPlayer);
+            analyserNode = audioContext.createAnalyser();
+            analyserNode.fftSize = 2048; // Sets the window size for FFT. Higher = more freq resolution, less time resolution.
+            // analyserNode.smoothingTimeConstant = 0.8; // Makes frequency data smoother
+
+            audioSource.connect(analyserNode);
+            analyserNode.connect(audioContext.destination); // Connect to speakers
+
+            drawStaticWaveform(audioBuffer); // Draw the full waveform once
+            setupAudioPlayerListeners(); // Set up play/pause listeners for animation control
+        }
+
+        // --- Drawing Functions ---
+
+        // Draw the full static waveform
+        function drawStaticWaveform(buffer) {
+            const width = waveformCanvas.width;
+            const height = waveformCanvas.height;
+            waveformCtx.clearRect(0, 0, width, height); // Clear previous drawing
+
+            waveformCtx.fillStyle = '#f8f8f8'; // Canvas background
+            waveformCtx.fillRect(0, 0, width, height);
+
+            waveformCtx.strokeStyle = '#4A90E2'; // Waveform line color
+            waveformCtx.lineWidth = 1.5;
+
+            const data = buffer.getChannelData(0); // Get audio data from the first channel
+            const step = Math.ceil(data.length / width); // How many data points per pixel
+            const amp = height / 2; // Amplitude center
+
+            waveformCtx.beginPath();
+            waveformCtx.moveTo(0, amp); // Start at the middle left
+
+            for (let i = 0; i < width; i++) {
+                let min = 1.0;
+                let max = -1.0;
+                for (let j = 0; j < step; j++) {
+                    const datum = data[(i * step) + j];
+                    if (datum < min) min = datum;
+                    if (datum > max) max = datum;
+                }
+                waveformCtx.lineTo(i, (1 + max) * amp); // Top peak
             }
 
-            // Create a new Wavesurfer instance
-            wavesurfer = WaveSurfer.create({
-                container: '#waveform', // ID of the div for the waveform
-                waveColor: '#4A90E2',   // A nice blue for the waveform
-                progressColor: '#5C7AFF', // A slightly brighter blue for progress
-                cursorColor: '#2C3E50', // Darker blue for cursor
-                barWidth: 2,            // Width of each waveform bar
-                barGap: 1,              // Gap between bars
-                barRadius: 2,           // Radius of bar corners
-                height: 120,            // Height of the waveform display
-                responsive: true,       // Make it responsive to container size changes
-                hideScrollbar: true,    // Hide the scrollbar
-                normalize: true,        // Normalize peaks to 0..1 for better visual scaling
-                interact: true,         // Allow seeking by clicking on waveform
-                plugins: [
-                    // Integrate the Spectrogram plugin
-                    WaveSurfer.Spectrogram.create({
-                        container: '#spectrogram', // ID of the div for the spectrogram
-                        labels: true,              // Show frequency labels on the side
-                        labelsColor: '#555',       // Color of the labels
-                        labelsBackground: 'transparent', // Transparent background for labels
-                        fftSamples: 512,           // Number of samples per FFT window.
-                                                   // Higher = more frequency detail, less time detail.
-                        height: 200,               // Height of the spectrogram display
-                        // For a 'magma'-like feel similar to librosa:
-                        // The `colorMap` property can take an array of objects for custom colors.
-                        // This approximates a magma-like gradient. You might need to fine-tune.
-                        colorMap: [
-                            { rgb: [0, 0, 0],    percent: 0 },   // Black for low intensity
-                            { rgb: [70, 0, 70],  percent: 0.2 }, // Dark purple
-                            { rgb: [150, 0, 0],  percent: 0.4 }, // Dark red
-                            { rgb: [255, 100, 0], percent: 0.6 }, // Orange
-                            { rgb: [255, 255, 0], percent: 0.8 }, // Yellow
-                            { rgb: [255, 255, 255], percent: 1 } // White for high intensity
-                        ]
-                    })
-                ]
-            });
+            for (let i = width - 1; i >= 0; i--) { // Draw bottom part back
+                let min = 1.0;
+                let max = -1.0;
+                for (let j = 0; j < step; j++) {
+                    const datum = data[(i * step) + j];
+                    if (datum < min) min = datum;
+                    if (datum > max) max = datum;
+                }
+                waveformCtx.lineTo(i, (1 + min) * amp); // Bottom peak
+            }
+            waveformCtx.closePath();
+            waveformCtx.stroke();
+            waveformCtx.fill(); // Fill the waveform area
+        }
 
-            // --- Event Listeners to synchronize audio player and wavesurfer ---
+        // Draw the moving playhead on the waveform
+        function drawPlayhead() {
+            if (!audioPlayer.duration || isNaN(audioPlayer.duration)) return; // Ensure duration is valid
 
-            // When Wavesurfer starts playing, also play the HTML audio element
-            wavesurfer.on('play', () => audioPlayer.play());
-            // When Wavesurfer pauses, also pause the HTML audio element
-            wavesurfer.on('pause', () => audioPlayer.pause());
-            // When user seeks on the waveform, update the HTML audio element's time
-            wavesurfer.on('seek', (progress) => {
-                audioPlayer.currentTime = progress * audioPlayer.duration;
-            });
+            const width = waveformCanvas.width;
+            const height = waveformCanvas.height;
 
-            // When HTML audio element starts playing, tell Wavesurfer to play
-            audioPlayer.onplay = () => wavesurfer.play();
-            // When HTML audio element pauses, tell Wavesurfer to pause
-            audioPlayer.onpause = () => wavesurfer.pause();
-            // When HTML audio element's time updates, update Wavesurfer's position
-            audioPlayer.ontimeupdate = () => {
-                // Only update wavesurfer if it's not already playing or has just stopped
-                // This prevents a rapid back-and-forth update loop
-                if (!wavesurfer.isPlaying()) {
-                    wavesurfer.seekTo(audioPlayer.currentTime / audioPlayer.duration);
+            // Clear previous playhead if it exists and is not at 0
+            if (playheadAnimationId) {
+                const oldX = (audioPlayer.currentTime - (1/60)) / audioPlayer.duration * width; // Estimate previous position
+                waveformCtx.clearRect(oldX - 2, 0, 5, height); // Clear a small area around the old line
+                drawStaticWaveform(audioBuffer); // Redraw the static waveform segment in the cleared area
+            }
+
+            // Calculate current playhead position
+            const x = (audioPlayer.currentTime / audioPlayer.duration) * width;
+
+            waveformCtx.strokeStyle = 'red';
+            waveformCtx.lineWidth = 2;
+            waveformCtx.beginPath();
+            waveformCtx.moveTo(x, 0);
+            waveformCtx.lineTo(x, height);
+            waveformCtx.stroke();
+        }
+
+
+        // Start the real-time scrolling spectrogram animation
+        function startSpectrogramAnimation() {
+            if (!analyserNode) return;
+
+            const bufferLength = analyserNode.frequencyBinCount; // Half of fftSize
+            const dataArray = new Uint8Array(bufferLength);
+            const sliceWidth = 1; // Drawing 1 pixel slice at a time
+
+            spectrogramCtx.clearRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height); // Clear on start
+
+            function animateSpectrogram() {
+                // Shift existing content to the left
+                spectrogramCtx.drawImage(spectrogramCanvas, -sliceWidth, 0, spectrogramCanvas.width, spectrogramCanvas.height);
+                // Clear the rightmost column for new data
+                spectrogramCtx.clearRect(spectrogramCanvas.width - sliceWidth, 0, sliceWidth, spectrogramCanvas.height);
+
+                analyserNode.getByteFrequencyData(dataArray); // Get frequency data
+
+                // Draw the new column of data
+                for (let i = 0; i < bufferLength; i++) {
+                    const value = dataArray[i]; // Value is 0-255
+                    const percent = value / 255;
+                    const y = spectrogramCanvas.height - (i / bufferLength) * spectrogramCanvas.height; // Map freq to Y (bottom-up)
+
+                    // Simple "magma-like" color mapping (HSL)
+                    // Hue: Red (0) to Purple (300)
+                    // Saturation: Always high (100%)
+                    // Lightness: From dark (20%) to bright (80%) based on intensity
+                    const hue = 0 + (1 - percent) * 80; // From ~red to orange/yellow
+                    const saturation = 100;
+                    const lightness = 20 + percent * 60; // From dark to bright
+                    spectrogramCtx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+                    spectrogramCtx.fillRect(spectrogramCanvas.width - sliceWidth, y, sliceWidth, spectrogramCanvas.height / bufferLength);
+                }
+                spectrogramAnimationId = requestAnimationFrame(animateSpectrogram);
+            }
+            animateSpectrogram(); // Start the loop
+        }
+
+        // --- Animation Control ---
+
+        function setupAudioPlayerListeners() {
+            // Start animations when audio plays
+            audioPlayer.onplay = () => {
+                if (!spectrogramAnimationId) {
+                    startSpectrogramAnimation();
+                }
+                if (!playheadAnimationId) {
+                    // Use requestAnimationFrame for smoother playhead,
+                    // but it needs to redraw entire waveform each time for proper clearing,
+                    // or draw on a separate canvas. For simplicity, we'll redraw a small area.
+                    // Even simpler: Just redraw the playhead within the existing loop.
+                    // For "simple man", let's make it easy to follow:
+                    playheadAnimationId = requestAnimationFrame(function animateWaveformPlayhead() {
+                        drawStaticWaveform(audioBuffer); // Redraw full waveform
+                        drawPlayhead(); // Draw playhead on top
+                        if (!audioPlayer.paused) {
+                           playheadAnimationId = requestAnimationFrame(animateWaveformPlayhead);
+                        }
+                    });
                 }
             };
 
-            // Event handler for when Wavesurfer has loaded and processed the audio
-            wavesurfer.on('ready', () => {
-                console.log('Wavesurfer and Spectrogram are ready!');
-                // Optionally, you can auto-play here:
-                // wavesurfer.play();
-            });
-
-            // Event handler for errors during audio loading/processing
-            wavesurfer.on('error', (err) => {
-                console.error("Wavesurfer error:", err);
-                alert("Error loading audio file. Please try another one or check browser console.");
-            });
+            // Stop animations when audio pauses or ends
+            audioPlayer.onpause = () => {
+                stopAnimations();
+            };
+            audioPlayer.onended = () => {
+                stopAnimations();
+                // Reset playhead to start
+                drawStaticWaveform(audioBuffer); // Redraw without playhead
+                waveformCtx.strokeStyle = 'red';
+                waveformCtx.lineWidth = 2;
+                waveformCtx.beginPath();
+                waveformCtx.moveTo(0, 0);
+                waveformCtx.lineTo(0, waveformCanvas.height);
+                waveformCtx.stroke();
+            };
         }
 
-        // --- File Handling Logic ---
-
-        // Function to handle the selected file
-        function handleFile(file) {
-            // Check if the file is an audio type
-            if (file.type.startsWith('audio/')) {
-                initWavesurfer(); // Initialize/reset Wavesurfer for the new file
-
-                // Create a URL for the selected file
-                const fileURL = URL.createObjectURL(file);
-                audioPlayer.src = fileURL; // Set the audio player's source
-                wavesurfer.load(fileURL);  // Load the file into Wavesurfer for visualization
-            } else {
-                alert('Please upload an audio file (e.g., MP3, WAV, OGG)!');
+        function stopAnimations() {
+            if (spectrogramAnimationId) {
+                cancelAnimationFrame(spectrogramAnimationId);
+                spectrogramAnimationId = null;
+            }
+            if (playheadAnimationId) {
+                cancelAnimationFrame(playheadAnimationId);
+                playheadAnimationId = null;
             }
         }
 
-        // --- Drag and Drop functionality ---
+        // Initial setup to clear canvases
+        waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+        waveformCtx.fillStyle = '#f8f8f8';
+        waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+        spectrogramCtx.clearRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height);
+        spectrogramCtx.fillStyle = '#f8f8f8';
+        spectrogramCtx.fillRect(0, 0, spectrogramCanvas.width, spectrogramCanvas.height);
 
-        // Make the drop area clickable to open the file dialog
-        dropArea.addEventListener('click', () => fileInput.click());
-
-        // Prevent default drag behaviors (like opening file in new tab)
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropArea.addEventListener(eventName, preventDefaults, false);
-        });
-
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
-        // Highlight drop area when item is dragged over it
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropArea.addEventListener(eventName, highlight, false);
-        });
-
-        // Remove highlight when item leaves or is dropped
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropArea.addEventListener(eventName, unhighlight, false);
-        });
-
-        function highlight(e) {
-            dropArea.classList.add('highlight');
-        }
-
-        function unhighlight(e) {
-            dropArea.classList.remove('highlight');
-        }
-
-        // Handle dropped files
-        dropArea.addEventListener('drop', handleDrop, false);
-
-        function handleDrop(e) {
-            const dt = e.dataTransfer;
-            const files = dt.files; // Get the list of dropped files
-            if (files.length > 0) {
-                handleFile(files[0]); // Process the first dropped file
-            }
-        }
-
-        // Handle file selected via the input dialog
-        fileInput.addEventListener('change', (e) => {
-            const files = e.target.files; // Get the list of selected files
-            if (files.length > 0) {
-                handleFile(files[0]); // Process the first selected file
-            }
-        });
-
-        // Initialize Wavesurfer when the page first loads
-        initWavesurfer();
+        // Inform user how to start
+        statusMessage.textContent = "Please select an audio file to begin.";
     </script>
 </body>
 </html>
