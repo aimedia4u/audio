@@ -3,315 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Audio Features Visualizer</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f0f2f5;
-            color: #333;
-            text-align: center;
-            line-height: 1.6;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 900px;
-            width: 100%;
-            margin: 20px auto;
-            background-color: #ffffff;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            box-sizing: border-box;
-        }
-
-        h1 {
-            color: #2c3e50;
-            margin-bottom: 10px;
-            font-size: 2.2em;
-        }
-        h2 {
-            color: #34495e;
-            margin-top: 30px;
-            margin-bottom: 15px;
-            font-size: 1.6em;
-            text-align: left;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 5px;
-        }
-
-        .file-input-section {
-            margin-bottom: 30px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
-
-        input[type="file"] {
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            background-color: #e9ecef;
-            cursor: pointer;
-            font-size: 1em;
-            transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        input[type="file"]:hover {
-            border-color: #007bff;
-            box-shadow: 0 0 5px rgba(0, 123, 255, 0.2);
-        }
-
-        audio {
-            width: 100%;
-            margin-top: 20px;
-            border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            background-color: #f5f5f5;
-        }
-
-        canvas {
-            display: block;
-            margin: 20px auto;
-            border: 1px solid #dcdcdc;
-            background-color: #f8f8f8;
-            border-radius: 8px;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
-        }
-
-        #statusMessage {
-            color: #555;
-            font-size: 0.9em;
-            margin-top: 10px;
-            min-height: 1.5em;
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 20px;
-            }
-            h1 {
-                font-size: 1.8em;
-            }
-            h2 {
-                font-size: 1.4em;
-            }
-            input[type="file"] {
-                width: 90%;
-            }
-        }
-    </style>
+    <title>Video Audio Synchronizer</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Dynamic Audio Features Visualizer</h1>
-        <p>Upload an audio file (.mp3, .wav, etc.) to see its real-time waveform and loudness.</p>
+        <h1>Video Audio Synchronizer (Client-Side)</h1>
+        <p>Upload your video and audio files, and this app will stretch/compress the video to match the audio duration using FFmpeg.wasm in your browser.</p>
 
-        <div class="file-input-section">
-            <input type="file" id="audioFileInput" accept="audio/*">
-            <p id="statusMessage">Please select an audio file to begin.</p>
+        <div class="input-group">
+            <label for="videoInput">Upload Video (.mp4, .mov, etc.):</label>
+            <input type="file" id="videoInput" accept="video/*">
         </div>
 
-        <div class="visualizer-section">
-            <h2>Audio Playback</h2>
-            <audio id="audioPlayer" controls></audio>
+        <div class="input-group">
+            <label for="audioInput">Upload Audio (.mp3, .wav, etc.):</label>
+            <input type="file" id="audioInput" accept="audio/*">
         </div>
 
-        <div class="visualizer-section">
-            <h2>Scrolling Waveform (Amplitude)</h2>
-            <canvas id="waveformCanvas" width="800" height="150"></canvas>
+        <button id="processBtn" disabled>Process Video</button>
+        <button id="resetBtn">Reset</button>
+
+        <div id="status-container">
+            <h2>Status / Logs:</h2>
+            <pre id="logs"></pre>
         </div>
 
-        <div class="visualizer-section">
-            <h2>Scrolling RMS Loudness</h2>
-            <canvas id="rmsCanvas" width="800" height="150"></canvas>
+        <div id="output-container" style="display: none;">
+            <h2>Result:</h2>
+            <video id="outputVideo" controls width="640"></video>
+            <a id="downloadLink" download="synced_video.mp4" class="button">Download Synced Video</a>
+        </div>
+
+        <div class="warning-box">
+            <h3>Important Notes:</h3>
+            <ul>
+                <li>Processing happens entirely in your browser. No files are uploaded to a server.</li>
+                <li>Large files may take a long time to process and consume significant memory.</li>
+                <li>Compatibility: Uses WebAssembly (WASM), which works on modern browsers (Chrome, Firefox, Edge, Safari).</li>
+                <li>Initial load time: FFmpeg.wasm library needs to be downloaded the first time (around 20MB).</li>
+            </ul>
         </div>
     </div>
 
-    <script>
-        // --- Get DOM Elements ---
-        const audioFileInput = document.getElementById('audioFileInput');
-        const audioPlayer = document.getElementById('audioPlayer');
-        const waveformCanvas = document.getElementById('waveformCanvas');
-        const rmsCanvas = document.getElementById('rmsCanvas'); // Renamed from spectrogramCanvas
-        const statusMessage = document.getElementById('statusMessage');
-
-        const waveformCtx = waveformCanvas.getContext('2d');
-        const rmsCtx = rmsCanvas.getContext('2d');
-
-        // --- Global Audio API Variables ---
-        let audioContext = null;
-        let analyserNode = null;
-        let audioSource = null;
-        let animationId = null; // Single animation ID for both plots
-
-        // --- Constants for Visualization ---
-        const FFT_SIZE = 2048; // Samples for analyser. Affects resolution of real-time data.
-        const SLICE_WIDTH = 1; // How many pixels to draw per animation frame (and shift by)
-
-        // Data arrays to hold audio time-domain data (for waveform and RMS)
-        let timeDomainData = new Float32Array(FFT_SIZE); // For float values (-1.0 to 1.0)
-
-        // --- Event Listener for File Input ---
-        audioFileInput.addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if (file) {
-                statusMessage.textContent = "Loading audio...";
-                try {
-                    await loadAudio(file);
-                    statusMessage.textContent = `Audio loaded: ${file.name}`;
-                } catch (error) {
-                    statusMessage.textContent = `Error loading audio: ${error.message}`;
-                    console.error("Audio loading error:", error);
-                }
-            } else {
-                statusMessage.textContent = "No file selected.";
-            }
-        });
-
-        // --- Core Audio Loading and Processing Function ---
-        async function loadAudio(file) {
-            // Reset existing state
-            stopAnimation();
-            if (audioContext) audioContext.close(); // Close previous context
-            audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Create new context
-
-            audioPlayer.src = URL.createObjectURL(file); // Set source for HTML audio player
-            audioPlayer.load(); // Load the audio file
-
-            // Connect HTML audio player to AudioContext for real-time analysis
-            audioSource = audioContext.createMediaElementSource(audioPlayer);
-            analyserNode = audioContext.createAnalyser();
-            analyserNode.fftSize = FFT_SIZE; // Set the window size for analysis
-            analyserNode.smoothingTimeConstant = 0.5; // Smoothes the data
-
-            audioSource.connect(analyserNode);
-            analyserNode.connect(audioContext.destination); // Connect to speakers
-
-            setupAudioPlayerListeners(); // Set up play/pause listeners for animation control
-
-            // Clear canvases fully when new audio loads
-            clearCanvases();
-        }
-
-        // --- Drawing Functions ---
-
-        // Main animation loop that updates both scrolling plots
-        function animatePlots() {
-            if (!analyserNode || audioPlayer.paused || audioPlayer.ended) {
-                animationId = null; // Stop the loop if conditions are not met
-                return;
-            }
-
-            // Get time-domain data (amplitude values)
-            analyserNode.getFloatTimeDomainData(timeDomainData);
-
-            // --- Draw Scrolling Waveform ---
-            const waveformWidth = waveformCanvas.width;
-            const waveformHeight = waveformCanvas.height;
-            const waveformCenterY = waveformHeight / 2;
-
-            // Shift existing waveform content to the left
-            waveformCtx.drawImage(waveformCanvas, -SLICE_WIDTH, 0, waveformWidth, waveformHeight);
-            // Clear the rightmost column for new data
-            waveformCtx.clearRect(waveformWidth - SLICE_WIDTH, 0, SLICE_WIDTH, waveformHeight);
-
-            // Draw the new waveform slice
-            waveformCtx.strokeStyle = '#4A90E2'; // Blue
-            waveformCtx.lineWidth = 1;
-            waveformCtx.beginPath();
-            waveformCtx.moveTo(waveformWidth - SLICE_WIDTH, waveformCenterY); // Start at previous point's Y
-
-            // Average samples for smoother line in one pixel slice
-            let sumAmplitude = 0;
-            for (let i = 0; i < timeDomainData.length; i++) {
-                sumAmplitude += timeDomainData[i];
-            }
-            // Use the first sample or an average for this slice's amplitude
-            const avgAmplitude = timeDomainData[0]; // Simplest: just use the first sample
-            // More robust: average over the whole buffer for the "current" amplitude
-            // const avgAmplitude = sumAmplitude / timeDomainData.length;
-
-            const xPos = waveformWidth - SLICE_WIDTH;
-            const yPos = waveformCenterY + avgAmplitude * waveformCenterY;
-            waveformCtx.lineTo(xPos, yPos);
-            waveformCtx.stroke();
-
-
-            // --- Draw Scrolling RMS Loudness ---
-            const rmsWidth = rmsCanvas.width;
-            const rmsHeight = rmsCanvas.height;
-            const rmsCenterY = rmsHeight; // RMS is positive, so plot from bottom
-
-            // Shift existing RMS content to the left
-            rmsCtx.drawImage(rmsCanvas, -SLICE_WIDTH, 0, rmsWidth, rmsHeight);
-            // Clear the rightmost column for new data
-            rmsCtx.clearRect(rmsWidth - SLICE_WIDTH, 0, SLICE_WIDTH, rmsHeight);
-
-            // Calculate RMS for the current timeDomainData buffer
-            let sumOfSquares = 0;
-            for (let i = 0; i < timeDomainData.length; i++) {
-                sumOfSquares += timeDomainData[i] * timeDomainData[i];
-            }
-            const rmsValue = Math.sqrt(sumOfSquares / timeDomainData.length); // RMS is 0 to 1
-
-            // Map RMS value to Y position on canvas (inverted for "higher is louder")
-            const rmsY = rmsHeight - (rmsValue * rmsHeight); // Max RMS (1) is at bottom (0)
-
-            rmsCtx.fillStyle = '#E74C3C'; // Red
-            rmsCtx.fillRect(rmsWidth - SLICE_WIDTH, rmsY, SLICE_WIDTH, rmsHeight - rmsY); // Draw a bar for RMS
-
-            // Optionally, draw a line connecting RMS values (more complex for scrolling line graph)
-            // For a "simple man", the bars are more straightforward.
-
-            // Request next animation frame
-            animationId = requestAnimationFrame(animatePlots);
-        }
-
-        // --- Animation Control ---
-
-        function setupAudioPlayerListeners() {
-            audioPlayer.onplay = () => {
-                if (!animationId) { // Only start if not already running
-                    animatePlots();
-                }
-            };
-
-            audioPlayer.onpause = () => {
-                stopAnimation();
-            };
-            audioPlayer.onended = () => {
-                stopAnimation();
-                clearCanvases(); // Clear canvases on end
-                statusMessage.textContent = "Audio playback ended. Select another file.";
-            };
-        }
-
-        function stopAnimation() {
-            if (animationId) {
-                cancelAnimationFrame(animationId);
-                animationId = null;
-            }
-        }
-
-        function clearCanvases() {
-            waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-            waveformCtx.fillStyle = '#f8f8f8'; // Background color
-            waveformCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
-
-            rmsCtx.clearRect(0, 0, rmsCanvas.width, rmsCanvas.height);
-            rmsCtx.fillStyle = '#f8f8f8'; // Background color
-            rmsCtx.fillRect(0, 0, rmsCanvas.width, rmsCanvas.height);
-        }
-
-        // Initial setup on page load
-        clearCanvases();
-        statusMessage.textContent = "Please select an audio file to begin.";
-    </script>
+    <!-- Load ffmpeg.wasm from CDN -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.9.7/dist/ffmpeg.min.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
